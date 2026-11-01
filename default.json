@@ -1,0 +1,46 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Shared Renovate preset for jon4hz Jellyfin plugins: nuget, global.json SDK, GitHub Actions and pre-commit hooks",
+  "extends": [
+    "config:best-practices",
+    ":semanticCommits",
+    "schedule:weekly",
+    "mergeConfidence:all-badges"
+  ],
+  "timezone": "Europe/Zurich",
+  "dependencyDashboard": true,
+  "dependencyDashboardOSVVulnerabilitySummary": "all",
+  "osvVulnerabilityAlerts": true,
+  "automerge": false,
+  "minimumReleaseAge": "7 days",
+  "pre-commit": {
+    "enabled": true
+  },
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "semanticCommitType": "fix",
+    "schedule": ["at any time"],
+    "minimumReleaseAge": null
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["nuget"],
+      "groupName": "nuget dependencies"
+    },
+    {
+      "description": "Jellyfin server packages: a bump changes targetAbi, keep it a PR of its own",
+      "matchManagers": ["nuget"],
+      "matchPackageNames": ["Jellyfin.Controller", "Jellyfin.Model"],
+      "groupName": "jellyfin",
+      "addLabels": ["jellyfin"]
+    },
+    {
+      "matchManagers": ["github-actions"],
+      "groupName": "github actions"
+    },
+    {
+      "matchManagers": ["pre-commit"],
+      "groupName": "pre-commit hooks"
+    }
+  ]
+}

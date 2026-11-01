@@ -1,12 +1,11 @@
 # jellyfin-plugin-ci
 
-Reusable GitHub Actions workflows shared by my Jellyfin plugins.
+Reusable GitHub Actions workflows and the shared [Renovate](https://docs.renovatebot.com/) preset for my Jellyfin plugins.
 
 | Workflow | What it does |
 |---|---|
 | `ci.yml` | `dotnet build` with warnings as errors, plus pre-commit (re-runnable on a PR via the `pre-commit ci run` label) |
 | `release.yml` | sets the version in the csproj, `dotnet publish` (the csproj's `CreatePluginPackage` target zips the plugin), creates the GitHub release and prepends the version to `manifest.json` on `main` |
-| `update-pre-commit.yml` | weekly `pre-commit autoupdate` PR |
 
 Conventions a plugin repo has to follow: one `*.sln`, `global.json` and `manifest.json` in the root, the project at `<Name>/<Name>.csproj` with `AssemblyVersion`/`FileVersion`/`PluginVersion` properties, and a package named `bin/<repo-name>-<version>.zip`. `targetAbi` is derived from the `Jellyfin.Controller` package version.
 
@@ -49,17 +48,12 @@ jobs:
       version: ${{ inputs.version || github.ref_name }}
 ```
 
-```yaml
-# update-pre-commit.yml
-name: Update pre-commit hooks
-on:
-  schedule:
-    - cron: '0 9 * * 1'
-  workflow_dispatch:
-jobs:
-  update:
-    uses: jon4hz/jellyfin-plugin-ci/.github/workflows/update-pre-commit.yml@main
-    permissions:
-      contents: write
-      pull-requests: write
+Renovate (the Mend app, installed on the repo) keeps nuget packages, the `global.json` SDK, GitHub Actions and pre-commit hook revisions up to date:
+
+```json
+// renovate.json
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["github>jon4hz/jellyfin-plugin-ci"]
+}
 ```
