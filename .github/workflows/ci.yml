@@ -42,9 +42,6 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Install gitleaks
-        run: curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/scripts/install.sh | sh -s -- -b /usr/local/bin
-
       - uses: pre-commit/action@v3.0.1
 
       - uses: pre-commit-ci/lite-action@v1.1.0
