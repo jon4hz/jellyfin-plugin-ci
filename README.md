@@ -21,7 +21,7 @@ on:
     types: [labeled, opened, reopened, synchronize]
 jobs:
   ci:
-    uses: jon4hz/jellyfin-plugin-ci/.github/workflows/ci.yml@main
+    uses: jon4hz/jellyfin-plugin-ci/.github/workflows/ci.yml@v0.1.0
     permissions:
       contents: read
       pull-requests: write
@@ -41,7 +41,7 @@ on:
         type: string
 jobs:
   release:
-    uses: jon4hz/jellyfin-plugin-ci/.github/workflows/release.yml@main
+    uses: jon4hz/jellyfin-plugin-ci/.github/workflows/release.yml@v0.1.0
     permissions:
       contents: write
     with:
