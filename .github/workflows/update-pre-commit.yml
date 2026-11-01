@@ -1,0 +1,34 @@
+# Reusable weekly pre-commit autoupdate; opens a PR when hooks changed.
+name: Update pre-commit hooks
+
+on:
+  workflow_call:
+
+jobs:
+  update-hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.x'
+
+      - run: pip install pre-commit
+
+      - run: pre-commit autoupdate
+
+      - uses: peter-evans/create-pull-request@v8
+        with:
+          commit-message: 'chore: update pre-commit hooks'
+          title: 'chore: update pre-commit hooks'
+          body: |
+            Automated weekly `pre-commit autoupdate`.
+            The pre-commit workflow on this PR validates the new hook versions.
+          branch: update-pre-commit-hooks
+          delete-branch: true
+          labels: |
+            dependencies
+            pre-commit

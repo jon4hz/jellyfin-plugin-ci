@@ -1,0 +1,144 @@
+# Reusable release for jon4hz Jellyfin plugins.
+# Builds the plugin package for `version`; on a tag push it also creates the
+# GitHub release and prepends the version to manifest.json on main.
+#
+# Conventions in the caller repo:
+#   - single *.sln in the root, project in <Name>/<Name>.csproj with
+#     AssemblyVersion/FileVersion/PluginVersion properties
+#   - the csproj's CreatePluginPackage target writes bin/<repo-name>-<version>.zip
+#   - optional <Name>Plugin.cs containing version="x.y.z" for script injection
+#   - targetAbi is derived from the Jellyfin.Controller package version (major.minor.0.0)
+name: Release
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version to build, with or without leading v'
+        required: true
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Set version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REPO_NAME: ${{ github.event.repository.name }}
+        run: |
+          VERSION="${INPUT_VERSION#v}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-.*)?$ ]]; then
+            echo "Invalid version: $VERSION (expected x.y.z or x.y.z-pre)"; exit 1
+          fi
+          ASSEMBLY_VERSION="${VERSION%%-*}.0"
+          CSPROJ=$(ls */*.csproj | head -1)
+          sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>$ASSEMBLY_VERSION</AssemblyVersion>|" "$CSPROJ"
+          sed -i "s|<FileVersion>.*</FileVersion>|<FileVersion>$ASSEMBLY_VERSION</FileVersion>|" "$CSPROJ"
+          sed -i "s|<PluginVersion>.*</PluginVersion>|<PluginVersion>$VERSION</PluginVersion>|" "$CSPROJ"
+          # cache-busting version in injected script tag, if the plugin has one
+          shopt -s nullglob
+          for f in */*Plugin.cs; do sed -i "s|version=\"[0-9.]*\"|version=\"$VERSION\"|g" "$f"; done
+          CONTROLLER=$(grep -o 'Include="Jellyfin.Controller" Version="[0-9.]*"' "$CSPROJ" | grep -o '[0-9.]*"$' | tr -d '"')
+          TARGET_ABI="${CONTROLLER%.*}.0.0"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "assembly-version=$ASSEMBLY_VERSION" >> "$GITHUB_OUTPUT"
+          echo "target-abi=$TARGET_ABI" >> "$GITHUB_OUTPUT"
+          echo "package=bin/${REPO_NAME}-$VERSION.zip" >> "$GITHUB_OUTPUT"
+          echo "Version $VERSION (assembly $ASSEMBLY_VERSION, targetAbi $TARGET_ABI)"
+
+      - name: Build and package
+        env:
+          PACKAGE: ${{ steps.version.outputs.package }}
+        run: |
+          dotnet publish --configuration Release
+          test -f "$PACKAGE"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: plugin-package
+          path: ${{ steps.version.outputs.package }}
+          retention-days: 30
+
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          PACKAGE: ${{ steps.version.outputs.package }}
+        run: |
+          CURRENT_TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git tag --sort=-version:refname | grep -A1 "^${CURRENT_TAG}$" | tail -1 | grep -v "^${CURRENT_TAG}$" || true)
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s" --reverse)
+          else
+            COMMITS=$(git log --pretty=format:"- %s" --reverse "$PREV_TAG"..HEAD)
+          fi
+
+          FEATURES="" FIXES="" BREAKING="" OTHER=""
+          while IFS= read -r commit; do
+            if [[ $commit =~ ^-[[:space:]]*[a-zA-Z]+(\(.+\))?!: ]]; then
+              BREAKING="$BREAKING$commit"$'\n'
+            elif [[ $commit =~ ^-[[:space:]]*feat(\(.+\))?: ]]; then
+              FEATURES="$FEATURES$commit"$'\n'
+            elif [[ $commit =~ ^-[[:space:]]*fix(\(.+\))?: ]]; then
+              FIXES="$FIXES$commit"$'\n'
+            else
+              OTHER="$OTHER$commit"$'\n'
+            fi
+          done <<< "$COMMITS"
+
+          {
+            [ -n "$BREAKING" ] && printf '## 💥 Breaking Changes\n\n%s\n' "$BREAKING"
+            [ -n "$FEATURES" ] && printf '## 🚀 Features\n\n%s\n' "$FEATURES"
+            [ -n "$FIXES" ]    && printf '## 🐛 Bug Fixes\n\n%s\n' "$FIXES"
+            [ -n "$OTHER" ]    && printf '## 📝 Other Changes\n\n%s\n' "$OTHER"
+            printf '## 📦 Installation\n\n1. Download the package file\n2. Extract to your Jellyfin plugins directory\n3. Restart Jellyfin\n4. Enable the plugin in admin dashboard\n\n'
+            printf '## 🔒 Checksums\n\n**SHA256:** `%s`\n' "$(sha256sum "$PACKAGE" | cut -d' ' -f1)"
+          } > release_notes.md
+          cat release_notes.md
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PACKAGE: ${{ steps.version.outputs.package }}
+        run: |
+          PRERELEASE=""
+          [[ "$VERSION" == *-* ]] && PRERELEASE="--prerelease"
+          gh release create "v$VERSION" "$PACKAGE" --title "Release v$VERSION" --notes-file release_notes.md $PRERELEASE
+
+      - name: Update manifest.json on main
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          ASSEMBLY_VERSION: ${{ steps.version.outputs.assembly-version }}
+          TARGET_ABI: ${{ steps.version.outputs.target-abi }}
+          PACKAGE: ${{ steps.version.outputs.package }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          jq --arg version "$ASSEMBLY_VERSION" \
+             --arg changelog "- See the full changelog at [GitHub](${REPO_URL}/releases/tag/v${VERSION})"$'\n' \
+             --arg targetAbi "$TARGET_ABI" \
+             --arg sourceUrl "${REPO_URL}/releases/download/v${VERSION}/$(basename "$PACKAGE")" \
+             --arg checksum "$(md5sum "$PACKAGE" | cut -d' ' -f1)" \
+             --arg timestamp "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+             '.[0].versions = [{$version, $changelog, $targetAbi, $sourceUrl, $checksum, $timestamp}] + .[0].versions' \
+             manifest.json > manifest.new.json
+          git checkout -- .   # drop version bumps; only the manifest goes to main
+          git fetch origin main
+          git checkout main
+          mv manifest.new.json manifest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          git commit -m "chore: update manifest.json for release v${VERSION}"
+          git push origin main

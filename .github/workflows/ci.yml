@@ -1,0 +1,51 @@
+# Reusable CI for jon4hz Jellyfin plugins: build + pre-commit.
+# Expects a single *.sln, global.json and .pre-commit-config.yaml in the caller repo root.
+name: CI
+
+on:
+  workflow_call:
+
+jobs:
+  build:
+    if: github.event.action != 'labeled'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Build
+        run: dotnet build --configuration Release /p:TreatWarningsAsErrors=true
+
+  pre-commit:
+    if: github.event.action != 'labeled' || github.event.label.name == 'pre-commit ci run'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Remove pre-commit ci run label
+        if: github.event.action == 'labeled'
+        run: gh pr edit ${{ github.event.number }} --remove-label 'pre-commit ci run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Install gitleaks
+        run: curl -sSfL https://raw.githubusercontent.com/gitleaks/gitleaks/master/scripts/install.sh | sh -s -- -b /usr/local/bin
+
+      - uses: pre-commit/action@v3.0.1
+
+      - uses: pre-commit-ci/lite-action@v1.1.0
+        if: always()
